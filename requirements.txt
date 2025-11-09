@@ -1,0 +1,6 @@
+crewai
+pydantic
+streamlit
+google-genai
+python-dotenv
+litellm

@@ -1,0 +1,12 @@
+venv/
+
+# API Keys & Secrets (CRITICAL)
+.env
+
+# Python Caches
+__pycache__/
+*.pyc
+
+# Streamlit/IDE files
+.streamlit/
+.vscode/
