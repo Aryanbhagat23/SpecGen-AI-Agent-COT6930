@@ -1,6 +1,18 @@
-crewai
-pydantic
-streamlit
-google-genai
-python-dotenv
-litellm
+streamlit==1.31.0
+crewai==0.28.0
+python-dotenv==1.0.0
+litellm==1.30.0
+pydantic==2.6.0
+```
+
+**Setup Instructions:**
+
+1. **Create these files:**
+   - `app.py` (the code I provided above)
+   - `agents.py` (the code just above)
+   - `models.py` (the code just above)
+   - `requirements.txt` (the list just above)
+
+2. **Create `.env` file:**
+```
+   GEMINI_API_KEY="AIzaSyDPc4b6hB6Zu4O8HDask6fiOcfNe1ivS5g"

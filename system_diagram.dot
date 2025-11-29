@@ -1,0 +1,46 @@
+// This is DOT (Graphviz) code.
+// Save this file as "system_diagram.dot"
+// After installing the extension, open the preview (often a button in the top-right)
+
+digraph SystemArchitecture {
+    rankdir=TB;
+    bgcolor="#f0fff0";
+    node [shape=box, style="filled", fillcolor="#e8f5e9", color="#38761d", fontcolor="#1e3c1e", fontname="Inter"];
+    edge [color="#38761d"];
+
+    subgraph "cluster_UI" {
+        label = "User Interface (Streamlit UI)";
+        bgcolor="#ffffff";
+        color="#6aa84f";
+        
+        User_Goal [label="User Provides Vague Goal", shape=ellipse, fillcolor="#f0fff0", color="#38761d"];
+        Input_Area [label="User Input Text Area"];
+        Generate_Button [label="Generate Button", shape=diamond];
+        Audit_Log [label="Display Audit Log"];
+        Download_Button [label="Display Download Button"];
+        Render_Flowchart [label="Render Flowchart"];
+        
+        User_Goal -> Input_Area;
+        Input_Area -> Generate_Button;
+    }
+
+    subgraph "cluster_GenAI" {
+        label = "GenAI Pipeline (specgen_core.py)";
+        bgcolor="#ffffff";
+        color="#6aa84f";
+
+        Analyzer [label="1. Goal Analyzer Agent", style="filled,bold", fillcolor="#c8e6c9"];
+        Generator [label="2. Feature Generator Agent", style="filled,bold", fillcolor="#c8e6c9"];
+        Critic [label="3. Validation Critic Agent", style="filled,bold", fillcolor="#c8e6c9"];
+        Parse_Output [label="Parse Final Output"];
+        
+        Analyzer -> Generator [label="  List of User Needs"];
+        Generator -> Critic [label="  Draft Spec + Mermaid Code"];
+        Critic -> Parse_Output [label="  Final Audited JSON"];
+    }
+    
+    Generate_Button -> Analyzer;
+    Parse_Output -> Audit_Log;
+    Parse_Output -> Download_Button;
+    Parse_Output -> Render_Flowchart;
+}

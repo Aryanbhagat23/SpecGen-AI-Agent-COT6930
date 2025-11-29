@@ -1,113 +1,148 @@
 import os
+from crewai import Agent, Task, Crew, Process, LLM
+from models import Specification # Ensure this import is correct
 from dotenv import load_dotenv
-from crewai import Agent, Task, Crew, Process, CrewOutput, LLM
-from pydantic import BaseModel, Field
 
-# --- Import local modules ---
-try:
-    from models import Specification
-except ImportError:
-    # Fallback/Error handling if models.py is missing
-    raise ImportError("Failed to import Specification from models.py. Ensure models.py is in the directory.")
-
-
-# Load environment variables
 load_dotenv()
 
-# --- LLM and Client Setup (The FIX for LiteLLM) ---
-try:
-    # Explicitly configure LiteLLM to use the Gemini provider
-    # LiteLLM automatically uses the GEMINI_API_KEY environment variable
-    GEMINI_MODEL_ID = "gemini/gemini-2.5-flash"
-    
-    # Instantiate the LLM object for CrewAI
-    gemini_llm = LLM(model=GEMINI_MODEL_ID) 
+# ---------------------------------------------
+#  VALIDATE API KEY
+# ---------------------------------------------
+if "GEMINI_API_KEY" not in os.environ:
+    # This check is redundant with the one in app.py, but essential for CLI runs.
+    raise ValueError("ERROR: GEMINI_API_KEY is missing from environment variables.")
 
-except Exception as e:
-    print(f"Error during LLM setup: {e}")
-    raise Exception(f"Failed to initialize LLM for CrewAI. Check API Key or LiteLLM installation: {e}")
-
-
-# --- 1. Define Agent Roles ---
-
-# 1.1. Goal Agent (Analyzer)
-goal_agent = Agent(
-    role='Goal Decomposition Analyst',
-    goal='Decompose a single, complex feature goal into a list of 7-8 atomic, clear, and actionable user needs/problems. Focus on mitigating ambiguity.',
-    backstory='You are an expert product manager focused on ensuring clarity and preventing ambiguity at the start of any software project.',
-    verbose=True,
-    allow_delegation=False,
-    llm=gemini_llm
+# ---------------------------------------------
+#  LLM CONFIGURATION (Gemini 2.5 Flash - stable and reliable)
+# ---------------------------------------------
+my_llm = LLM(
+    model="gemini-2.5-flash",     # Use the latest, stable model name
+    api_key=os.environ["GEMINI_API_KEY"],
+    temperature=0.4,
+    verbose=True, # Set to True for debugging agent thought process
 )
 
-# 1.2. Feature Agent (Generator & Multimodal Diagrammer)
-feature_agent = Agent(
-    role='Technical Specification Writer and Visual Planner',
-    goal='Take a list of user needs and generate a COMPLETE software specification document in detailed Markdown format. You MUST include a dedicated section titled \'## 4. Feature Flow Diagram\' containing a single Mermaid syntax block (e.g., \'```mermaid\\nflowchart TD\\n...\\n```\') that visually represents the core user journey or system logic for this feature.',
-    backstory='You are a rigorous technical writer who ensures every requirement is testable and clearly documented for the engineering team. Your output is production-ready.',
-    verbose=True,
-    allow_delegation=False,
-    llm=gemini_llm
-)
+# ---------------------------------------------
+#  CREW FACTORY
+# ---------------------------------------------
+def create_spec_crew(goal_text: str):
+    """
+    Creates the complete CrewAI pipeline (analyst → writer → reviewer)
+    and outputs a Specification pydantic object.
+    """
 
-# 1.3. Validation Agent (Critic)
-validation_agent = Agent(
-    role='Senior QA Lead and Specification Auditor',
-    goal="""
-    Critically review the full technical specification provided in the context against four core quality standards: Testability (GIVEN/WHEN/THEN format), Consistency, Completeness, and Clean Markdown Format.
-    Your primary function is to enforce rigorous quality control. 
-    1. Check for Testability: MUST ensure every high-level user need has complete GIVEN/WHEN/THEN acceptance criteria.
-    2. Check for Consistency: MUST flag or correct any contradictory statements or subjective terms (e.g., "fast," "easy") with measurable, objective criteria.
-    3. Check for Completeness: MUST ensure the document includes all required sections AND the Mermaid flowchart syntax.
-    4. Check for Format: MUST verify the syntax of the Mermaid diagram is valid and the overall Markdown is clean.
-
-    If ALL checks pass, output the final Specification JSON object with 'validation_status' set to 'Validated'.
-    If ANY fail, you must list the exact failures in the 'validation_critique' and then rewrite/correct the 'detailed_spec_markdown' content to resolve the issues before outputting the final JSON.
-    """,
-    backstory='You are a security-conscious, highly meticulous auditor who enforces that all specifications are robust and ready for development.',
-    verbose=True,
-    allow_delegation=False,
-    llm=gemini_llm
-)
-
-
-# --- 2. Define the Tasks (The Workflow) ---
-
-def create_tasks(feature_goal: str):
-    task1 = Task(
-        description=f"Decompose the following high-level feature goal into a list of 7-8 atomic user needs (starting with 'As a user, I want...'): {feature_goal}. Output only the list of needs.",
-        agent=goal_agent,
-        expected_output="A structured list of 7-8 specific, actionable user needs derived from the goal."
+    # ---------------------------
+    #  Agent 1 — Analyst (Goal Decomposition Agent)
+    # ---------------------------
+    analyst = Agent(
+        role="Product Analyst",
+        goal="Break down high-level feature goals into specific user stories, identify risks, and gather strategic insights.",
+        backstory="""You are an experienced product analyst who excels at understanding
+        user needs and decomposing complex features into clear, actionable user stories.
+        You always think from the user's perspective and perform strategic analysis.""",
+        allow_delegation=False,
+        verbose=True,
+        llm=my_llm,
     )
 
-    task2 = Task(
-        description="""Generate a full technical specification in detailed Markdown format based on the user needs provided. 
-        The document MUST be comprehensive (FRs, NFRs, Assumptions). 
-        CRITICAL: Include a section titled '## 4. Feature Flow Diagram' containing a single Mermaid syntax block (e.g., '```mermaid\\nflowchart TD\\n...\\n```') that visually represents the core user journey or system logic for this feature.""",
-        agent=feature_agent,
-        context=[task1], 
-        expected_output="A complete software specification document in Markdown format that strictly includes the Mermaid flowchart syntax."
+    # ---------------------------
+    #  Agent 2 — Technical Writer (Feature Specification Agent)
+    # ---------------------------
+    writer = Agent(
+        role="Lead Technical Writer",
+        goal="Transform analysis into a complete, structured Software Requirement Specification (SRS) in Markdown.",
+        backstory="""You are a precision technical writer. You produce clean,
+        well-structured SRS documents using standard FR-XXX and NFR-XXX conventions.""",
+        allow_delegation=False,
+        verbose=True,
+        llm=my_llm,
     )
 
-    task3 = Task(
-        description="Critically review the generated specification and Mermaid syntax for compliance, testability, and consistency, then prepare the final output using the required JSON schema.",
-        agent=validation_agent,
-        context=[task2], 
-        output_json=Specification,
-        expected_output="A Pydantic JSON object containing the complete, audited specification and the final validation status and critique."
+    # ---------------------------
+    #  Agent 3 — Reviewer / QA (Validation Agent)
+    # ---------------------------
+    reviewer = Agent(
+        role="QA Engineering Lead",
+        goal="Validate the specification for clarity, testability, and produce the final, perfectly structured JSON output matching the Specification model.",
+        backstory="""You rigorously verify requirement quality. You ensure every item is testable,
+        clear, and formatted properly. You produce the final structured output, and nothing else.""",
+        allow_delegation=False,
+        verbose=True,
+        llm=my_llm,
     )
-    
-    return [task1, task2, task3]
 
+    # ---------------------------
+    #  Task 1 — Analysis & Story Breakdown
+    # ---------------------------
+    analysis_task = Task(
+        description=f"""
+        Analyze this product goal and related context:
 
-# --- 3. Assemble the Crew ---
+        "{goal_text}"
 
-def create_spec_crew(feature_goal: str):
-    tasks = create_tasks(feature_goal)
+        Your output must contain:
+        - 3–5 high-level user stories following the 'As a [role], I want [action] so that [benefit]' format.
+        - Strategic notes on potential risks, missing workflows, and key features derived from the strategic context in the goal.
+        """,
+        expected_output="A structured analysis summary containing high-level user stories, risks, and strategic notes.",
+        agent=analyst,
+    )
+
+    # ---------------------------
+    #  Task 2 — Draft the SRS
+    # ---------------------------
+    drafting_task = Task(
+        description="""
+        Create a full Software Requirements Specification (SRS) in clean Markdown using the Analyst's output.
+
+        The document MUST be structured with clear headings:
+        # Title
+        ## Introduction
+        ## User Stories
+        ## Functional Requirements (FR-001…)
+        ## Non-Functional Requirements (NFR-001…)
+        ## API Requirements (if applicable)
+        ## Data Requirements (if applicable)
+        ## Risks & Mitigation
+        
+        Do NOT output JSON. Only the full Markdown text.
+        """,
+        agent=writer,
+        context=[analysis_task],
+        expected_output="A complete, well-formatted SRS document in Markdown.",
+    )
+
+    # ---------------------------
+    #  Task 3 — Validate & Output JSON
+    # ---------------------------
+    validation_task = Task(
+        description="""
+        Review the drafted SRS for completeness and quality.
+
+        You MUST produce a JSON object that strictly matches the Pydantic model: Specification.
+
+        Fill ALL fields:
+        - high_level_stories: Extract the list of user stories from the SRS.
+        - detailed_spec_markdown: Place the full SRS Markdown document here (as a single string).
+        - validation_status: Set to 'Validated' or 'Needs Revision'.
+        - validation_critique: A short summary of your quality check.
+
+        Return ONLY the raw JSON object, no Markdown code blocks or commentary.
+        """,
+        expected_output="A final validated JSON object strictly matching the Specification model.",
+        agent=reviewer,
+        context=[drafting_task],
+        output_pydantic=Specification,
+    )
+
+    # ---------------------------
+    #  Assemble Crew
+    # ---------------------------
     crew = Crew(
-        agents=[goal_agent, feature_agent, validation_agent],
-        tasks=tasks,
-        process=Process.sequential, 
-        verbose=1 
+        agents=[analyst, writer, reviewer],
+        tasks=[analysis_task, drafting_task, validation_task],
+        process=Process.sequential,
+        verbose=True,
     )
+
     return crew
